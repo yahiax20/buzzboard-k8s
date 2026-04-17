@@ -334,6 +334,10 @@ The monitoring stack fires Gmail alerts when:
 See [buzzboard-monitoring](https://github.com/yahiax20/buzzboard-monitoring) for the full monitoring setup.
 
 ---
+## What's Next (In Progress)
+
+Full CI/CD pipeline with GitHub Actions
+GitOps with ArgoCD
 
 ## 👤 Author
 
