@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: frontend
+data:
+  # This file gets mounted over /usr/share/nginx/html/config.js
+  # in the frontend container — overriding the baked-in Docker version
+  # The browser reads this to know where to find the APIs
+  config.js: |
+    window.REACTIONS_SVC_URL = 'https://reactions.buzzboard.local';
+    window.MOOD_SVC_URL = 'https://mood.buzzboard.local';
+

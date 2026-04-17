@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: data
+data:
+  mysql-database: "buzzboard"
+  mysql-user: "buzzboard"

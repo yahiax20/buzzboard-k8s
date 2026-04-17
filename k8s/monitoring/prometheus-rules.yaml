@@ -1,0 +1,122 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: buzzboard-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app: kube-prometheus-stack
+spec:
+  groups:
+
+    - name: node.alerts
+      interval: 30s
+      rules:
+
+        - alert: NodeHighCPU
+          expr: |
+            (1 - avg by(instance)(
+              rate(node_cpu_seconds_total{mode="idle"}[5m])
+            )) * 100 > 30
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.instance }}"
+            description: "CPU is {{ $value | printf \"%.1f\" }}% on {{ $labels.instance }}"
+
+        - alert: NodeHighMemory
+          expr: |
+            (1 - (
+              node_memory_MemAvailable_bytes /
+              node_memory_MemTotal_bytes
+            )) * 100 > 75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High Memory on {{ $labels.instance }}"
+            description: "Memory is {{ $value | printf \"%.1f\" }}% on {{ $labels.instance }}"
+
+        - alert: NodeDiskHigh
+          expr: |
+            (1 - (
+              node_filesystem_avail_bytes{
+                fstype!~"tmpfs|fuse.lxcfs|squashfs"
+              } /
+              node_filesystem_size_bytes{
+                fstype!~"tmpfs|fuse.lxcfs|squashfs"
+              }
+            )) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High Disk on {{ $labels.instance }}"
+            description: "Disk {{ $labels.mountpoint }} is {{ $value | printf \"%.1f\" }}% full"
+
+    - name: pod.alerts
+      interval: 30s
+      rules:
+
+        - alert: PodHighCPU
+          expr: |
+            (
+              rate(container_cpu_usage_seconds_total{
+                container!="",
+                container!="POD",
+                namespace=~"frontend|backend|data"
+              }[5m])
+              /
+              on(namespace, pod, container)
+              kube_pod_container_resource_limits{
+                resource="cpu",
+                namespace=~"frontend|backend|data"
+              }
+            ) * 100 > 40
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} high CPU"
+            description: "{{ $labels.pod }} in {{ $labels.namespace }} using {{ $value | printf \"%.1f\" }}% of CPU limit"
+
+        - alert: PodHighMemory
+          expr: |
+            (
+              container_memory_working_set_bytes{
+                container!="",
+                container!="POD",
+                namespace=~"frontend|backend|data"
+              }
+              /
+              on(namespace, pod, container)
+              kube_pod_container_resource_limits{
+                resource="memory",
+                namespace=~"frontend|backend|data"
+              }
+            ) * 100 > 75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} high Memory"
+            description: "{{ $labels.pod }} in {{ $labels.namespace }} using {{ $value | printf \"%.1f\" }}% of memory limit"
+
+    - name: pod.health.alerts
+      interval: 30s
+      rules:
+
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{
+              namespace=~"frontend|backend|data"
+            }[15m]) * 60 * 15 > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.pod }} is crash looping"
+            description: "{{ $labels.pod }} in {{ $labels.namespace }} restarted 3+ times in 15 minutes"
+
+

@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mood
+  namespace: backend
+  labels:
+    app: mood
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mood
+  template:
+    metadata:
+      labels:
+        app: mood
+        tier: backend
+    spec:
+      containers:
+        - name: mood
+          image: yahiaxx20/buzzboard-mood:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: PORT
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mood-secret
+                  key: redis-password
+            - name: MYSQL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: MYSQL_HOST
+            - name: MYSQL_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mood-secret
+                  key: mysql-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: MYSQL_DATABASE
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mood-secret
+                  key: jwt-secret
+            - name: REACTIONS_SVC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: mood-config
+                  key: REACTIONS_SVC_URL
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

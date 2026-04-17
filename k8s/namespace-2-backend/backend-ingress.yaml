@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: backend-ingress
+  namespace: backend
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+      - reactions.buzzboard.local
+      - mood.buzzboard.local
+      secretName: buzzboard-tls-secret
+  rules:
+    - host: reactions.buzzboard.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: reactions-svc
+                port:
+                  number: 8081
+    - host: mood.buzzboard.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mood-svc
+                port:
+                  number: 8082
