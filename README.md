@@ -41,28 +41,12 @@ and secured with TLS.**
 
 ## 🏗️ Architecture
 
-                    ┌─────────────────────────────────┐
-                    │         BROWSER (User)           │
-                    └────────────┬────────────────────┘
-                                 │ HTTPS
-                    ┌────────────▼────────────────────┐
-                    │   Traefik Ingress Controller     │
-                    │   TLS Termination (self-signed)  │
-                    └────┬──────────────────┬─────────┘
-                         │                  │
-           buzzboard.local            reactions/mood
-                         │            .buzzboard.local
-             ┌───────────▼──────────────────▼────────┐
-             │         NAMESPACE: frontend            │
-             │   Nginx (static HTML/CSS/JS)           │
-             │   ConfigMap → config.js (API URLs)     │
-             └───────────────────────────────────────┘
-                         │ Browser JS fetch()
-          ┌──────────────┴──────────────────┐
-          │                                  │
 
-┌─────────────▼──────────────┐ ┌──────────────▼─────────────┐ │ NAMESPACE: backend │ │ NAMESPACE: backend │ │ Reactions Service :8081 │ │ Mood Service :8082 │ │ ✅ Auth (signup/signin) │ │ ✅ Mood votes │ │ ✅ Reaction Wall │ │ ✅ JWT verification │ │ ✅ JWT signing │ │ HPA: 1-5 replicas │ │ HPA: 1-5 replicas │ └──────────────┬─────────────┘ └─────────────┬──────────────┘ │ └──────────────┬──────────────────┘ │ Both backends connect here ┌──────────────▼──────────────────────────┐ │ NAMESPACE: data │ │ ┌─────────────────┐ ┌────────────────┐ │ │ │ MySQL 8.0 │ │ Redis 7 │ │ │ │ StatefulSet │ │ StatefulSet │ │ │ │ PVC: Retain │ │ Cache Layer │ │ │ │ users table │ │ TTL: 60s │ │ │ │ reactions table│ │ │ │ │ │ mood_votes │ └────────────────┘ │ │ └─────────────────┘ │ └─────────────────────────────────────────┘
+- **Namespace 1 (frontend):** Ingress (TLS) + Frontend app (ClusterIP Service, ConfigMap, Secret, NetworkPolicy).
+- **Namespace 2 (backend):** 2 microservices — **Reactions** and **Mood** (each: Deployment, ClusterIP Service, ConfigMap, Secret). They call each other via Service DNS in the same namespace, Ingress with tls or security. HPA on reactions.
+- **Namespace 3 (data):** Redis and MySQL as **StatefulSets** (headless Services), ConfigMaps, Secrets, NetworkPolicy. StorageClass `standard-retain` with `reclaimPolicy: Retain` for MySQL PVCs.
 
+All components communicate **only via Kubernetes Services** (ClusterIP or headless).
           ┌─────────────────────────────────────────┐
           │         NAMESPACE: monitoring            │
           │  Prometheus → scrapes all namespaces     │
@@ -94,12 +78,6 @@ and secured with TLS.**
 | **TLS** | OpenSSL (self-signed) | HTTPS encryption |
 | **OS** | Fedora Linux | Host operating system |
 
----
-
-## 📁 Project Structure
-
-buzzboard-k8s/ ├── backend/ │ ├── mood/ # Mood voting microservice (Node.js :8082) │ │ ├── Dockerfile │ │ ├── server.js │ │ └── package.json │ └── reactions/ # Reactions + Auth microservice (Node.js :8081) │ ├── Dockerfile │ ├── server.js │ └── package.json ├── frontend/ # Static UI served by Nginx │ ├── Dockerfile │ ├── nginx.conf │ └── public/ ├── k8s/ │ ├── namespace-1-frontend/ # Nginx deployment, service, ingress │ ├── namespace-2-backend/ # Reactions, mood deployments + HPA │ ├── namespace-3-data/ # MySQL + Redis StatefulSets │ └── monitoring/ # Prometheus helm values + alert rules ├── docker-compose.yml # Local development ├── .env.example # Environment variable template └── README.md
-
 
 ---
 
@@ -124,8 +102,91 @@ buzzboard-k8s/ ├── backend/ │ ├── mood/ # Mood voting microservice
 
 ## 🚀 Quick Start
 
+## Run locally (before containerization)
+
+Try the app on your machine with no Docker images and no Kubernetes. You only need **Node.js**, **Redis**, and **MySQL** (Redis and MySQL can be run via Docker for convenience).
+
+### 1. Start Redis and MySQL
+
+**Option A — Docker (easiest):**
+
+```bash
+# Redis
+docker run -d --name buzzboard-redis -p 6379:6379 redis:7-alpine redis-server --requirepass buzzboard-redis-secret
+
+# MySQL (creates database and user)
+docker run -d --name buzzboard-mysql -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=buzzboard-mysql-root \
+  -e MYSQL_USER=buzzboard \
+  -e MYSQL_PASSWORD=buzzboard-mysql-secret \
+  -e MYSQL_DATABASE=buzzboard \
+  mysql:8.0
+```
+
+**Option B:** Use locally installed Redis and MySQL. Create a database `buzzboard` and user `buzzboard` with password `buzzboard-mysql-secret`.
+
+### 2. Start the two backend services
+
+In **two separate terminals**:
+
+```bash
+# Terminal 1 — Reactions (port 8081) — runs auth (signup/signin) and reactions
+cd backend/reactions
+npm install
+PORT=8081 REDIS_HOST=localhost REDIS_PASSWORD=buzzboard-redis-secret MYSQL_HOST=localhost MYSQL_USER=buzzboard MYSQL_PASSWORD=buzzboard-mysql-secret MYSQL_DATABASE=buzzboard JWT_SECRET=buzzboard-jwt-secret-change-in-production npm start
+```
+
+```bash
+# Terminal 2 — Mood (port 8082)
+cd backend/mood
+npm install
+PORT=8082 REDIS_HOST=localhost REDIS_PASSWORD=buzzboard-redis-secret MYSQL_HOST=localhost MYSQL_USER=buzzboard MYSQL_PASSWORD=buzzboard-mysql-secret MYSQL_DATABASE=buzzboard JWT_SECRET=buzzboard-jwt-secret-change-in-production npm start
+```
+
+### 3. Serve the frontend and point it at the backends
+
+Use the **local** config so the browser calls `http://localhost:8081` and `http://localhost:8082`:
+
+```bash
+# Copy local config (so the frontend uses localhost:8081 and :8082)
+cp frontend/public/config.local.js frontend/public/config.js
+
+# Serve the frontend (from project root)
+npx serve frontend/public -l 3000
+```
+
+Open **http://localhost:3000** in your browser. You’ll see **Sign in** and **Sign up** first; after signing up and signing in you can use:
+
+- **Reaction Wall** — post messages or emoji (stored with your user); data is in MySQL and cached in Redis (you’ll see “Source: Redis” vs “Source: MySQL” and latency).
+- **Mood of the Day** — tap a mood (stored with your user); tally is in MySQL and cached in Redis.
+
+Once this works, you can move on to **containerization** (Docker) and then **Kubernetes**. (For Docker/K8s you don’t rely on `config.js` in the repo — the frontend image uses `config.docker.js` or a ConfigMap, so overwriting `config.js` for local run is fine.)
+
+---
+## Quick start (Docker Compose)
+
+Runs all five services (Redis, MySQL, reactions, mood, frontend) with one command. No Kubernetes required.
+
+**From the project root** (folder that contains `docker-compose.yml`):
+
+```bash
+docker-compose up -d --build
+```
+
+**If you don’t see the new UI (Sign in / Sign up, “Ashour Chat Tutorial”):** Docker may be using an old frontend image. Rebuild without cache and restart:
+
+```bash
+docker-compose build --no-cache frontend reactions mood
+docker-compose up -d
+```
+
+Then hard-refresh the browser (Ctrl+Shift+R or Cmd+Shift+R) or open http://localhost:3001 in a private window.
+
+
+## Deploy to Kubernetes
+
 ### Prerequisites
-- Fedora Linux (or any Linux distro)
+- Any linux distro
 - k3s installed and running
 - Docker installed
 - Helm v3 installed
@@ -209,9 +270,10 @@ helm install prometheus prometheus-community/kube-prometheus-stack \
 kubectl apply -f k8s/monitoring/prometheus-rules.yaml
 ```
 
+
 ### 8. Access The App
 
-App: https://buzzboard.local Grafana: https://grafana.buzzboard.local user: admin / password: buzzboard-grafana-admin
+App: https://buzzboard.local Grafana: https://grafana.buzzboard.local user: admin / password: buzzboard-grafana-admin (you can change the password in helm-values.yaml)
 
 
 ---
@@ -262,13 +324,12 @@ Docker Compose YAML is indent-sensitive. `volumes:` and `networks:` indented by 
 ## 📊 Monitoring & Alerting
 
 The monitoring stack fires Gmail alerts when:
-- Node CPU > 75% sustained for 5 minutes
+- Node CPU > 75% sustained for 5 minutes (changed the values for testing )
 - Node Memory > 75% sustained for 5 minutes
 - Node Disk > 80% sustained for 5 minutes
 - Any pod CPU > 75% of its limit for 5 minutes
 - Any pod Memory > 75% of its limit for 5 minutes
 - Pod crash looping (3+ restarts in 15 minutes)
-- Pod not ready for 5+ minutes
 
 See [buzzboard-monitoring](https://github.com/yahiax20/buzzboard-monitoring) for the full monitoring setup.
 
